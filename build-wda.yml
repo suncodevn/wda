@@ -1,0 +1,62 @@
+name: Build WebDriverAgent IPA
+
+on:
+  workflow_dispatch:  # Chạy thủ công khi bạn bấm nút
+
+jobs:
+  build-wda:
+    runs-on: macos-latest
+    steps:
+      - name: Install Appium & XCUITest Driver
+        run: |
+          npm install -g appium
+          appium driver install xcuitest
+
+      - name: Find WDA Source
+        id: wda-path
+        run: |
+          WDA_DIR=$(find ~/.appium -name "appium-webdriveragent" -type d | head -1)
+          echo "WDA_DIR=$WDA_DIR" >> $GITHUB_OUTPUT
+          echo "Found WDA at: $WDA_DIR"
+
+      - name: Build WDA (unsigned)
+        run: |
+          cd "${{ steps.wda-path.outputs.WDA_DIR }}"
+          
+          # Build for real device (arm64) without code signing
+          xcodebuild build-for-testing \
+            -project WebDriverAgent.xcodeproj \
+            -scheme WebDriverAgentRunner \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath ./build \
+            CODE_SIGNING_ALLOWED=NO \
+            ARCHS=arm64 \
+            -quiet
+          
+          echo "✅ Build completed!"
+
+      - name: Package IPA
+        run: |
+          WDA_DIR="${{ steps.wda-path.outputs.WDA_DIR }}"
+          
+          # Find the .app bundle
+          APP_PATH=$(find "$WDA_DIR/build" -name "WebDriverAgentRunner-Runner.app" -type d | head -1)
+          echo "Found app at: $APP_PATH"
+          
+          # Create IPA structure
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
+          
+          # Create .ipa (which is just a zip)
+          zip -r WebDriverAgent.ipa Payload/
+          
+          echo "✅ IPA created!"
+          ls -la WebDriverAgent.ipa
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WebDriverAgent-unsigned
+          path: WebDriverAgent.ipa
+          retention-days: 90
